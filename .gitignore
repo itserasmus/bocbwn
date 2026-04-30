@@ -1,0 +1,4 @@
+*.exe
+*.bfvm
+*.bfasm
+*.s

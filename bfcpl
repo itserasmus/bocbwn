@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -e  # exit on error
+
+name="$1"
+
+if [ -z "$name" ]; then
+    echo "Usage: bfcpl <file-without-extension>"
+    exit 1
+fi
+
+clang++ bf_tpr.cpp -o bf_tpr.exe
+
+if [[ "$2" == "-asm" ]]; then
+    ./bf_tpr.exe "$name.bf" -asm
+    exit 0
+fi
+
+./bf_tpr.exe "$name.bf"
+
+./bf_asm_tpr.exe "$name.bfvm"
+
+clang++ bf_asm.cpp "$name.s" -o "$name.exe"
