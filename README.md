@@ -96,16 +96,16 @@ BOCBWN can be compiled and used with any standard C++ compiler. It must be set u
 files to executables as shown, with the compiler of your choice.
 ```bash
 clang++ bf_tpr.cpp -o bf_tpr -O3
-clang++ bf_asm_tpr.cpp -o bf_asm_tpr -O3
+clang++ bf_cmpr.cpp -o bf_cmpr -O3
 ```
 
 Then, to compile a brainfuck file you may use either the provided script in `bfcpl` for Unix-like
 environments including MSYS2, or the `bfcpl` command in `shell.nix` for NixOS users. Alternatively,
-if you are a Windows user or do not wish to recompile `bf_tpr.cpp` every time you use it, you may
+if you are a Windows user, you may
 use:
 ```bash
 ./bf_tpr foo.bf
-./bf_asm_tpr foo.bfvm
+./bf_cmpr foo.bfvm
 clang++ bf_asm.cpp foo.s -o foo
 ```
 

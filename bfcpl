@@ -8,7 +8,8 @@ if [ -z "$name" ]; then
     exit 1
 fi
 
-clang++ bf_tpr.cpp -o bf_tpr.exe
+# clang++ bf_tpr.cpp -o bf_tpr.exe
+clang++ bf_cmpr.cpp -o bf_cmpr.exe
 
 if [[ "$2" == "-asm" ]]; then
     ./bf_tpr.exe "$name.bf" -asm
@@ -17,6 +18,6 @@ fi
 
 ./bf_tpr.exe "$name.bf"
 
-./bf_asm_tpr.exe "$name.bfvm"
+./bf_cmpr.exe "$name.bfvm"
 
 clang++ bf_asm.cpp "$name.s" -o "$name.exe"

@@ -29,19 +29,6 @@
 
 
 
-#ifndef NUKE_ON_ENTER
-    #define NUKE_ON_ENTER true
-#endif
-#if NUKE_ON_ENTER
-    #define nuke(str) cout << str << endl; exit(1)
-#else
-    #define nuke(str) __builtin_unreachable()
-#endif
-
-#ifndef MAX_UALS_MATRIX_SIZE
-#define MAX_UALS_MATRIX_SIZE 15
-#endif
-
 
 
 inline uint8_t mod_inv(uint8_t x) {
