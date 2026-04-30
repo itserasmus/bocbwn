@@ -34,11 +34,11 @@ is, under this constraint, also sufficient for Turing completeness.
 
 Brainfuck leaves the size of the cell and the behavior of `,` and `.` as implementation-defined. In
 this implementation, a cell is 8 bits, represented as a `uint8_t` or stored in byte registers. To
-improve pipelining behavior on modern CPUs, which are designed with word (`uint32_t`) registers in
-mind, the compiler frequently uses word registers instead of byte registers. However, this usage is
-sufficiently constrained that the behavior it produces is (or rather, should be) identical to if
-byte registers had been used. The implementation of `,` and `.` is delegated further to the C
-functions getchar and putchar.
+improve pipelining behavior on modern CPUs, in which byte (`uint8_t`) registers can cause
+unnecessary false dependencies and stalling, the compiler frequently uses dword (`uint32_t`)
+registers instead of byte registers. However, this usage is sufficiently constrained that the
+behavior it produces is identical to if byte registers had been used. The implementation of `,` and
+`.` is delegated further to the C functions getchar and putchar.
 
 A truly bi-infinite tape is, due to unfortunate physical constraints imposed by the universe upon
 us poor, innocent, human beings, impossible. The brainfuck specification recognizes this failure of

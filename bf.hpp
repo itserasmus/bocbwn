@@ -10,6 +10,12 @@ struct command {
     uint8_t f1;     // might as well use all 8 bytes
     uint8_t f2;
 };
+
+// all instructions except
+// MOV, ADD, OUT, IN, BRZ, BRNZ, SET, PUTA, ACCUMA, MACMA, RKILL, OUTC, NOP,
+// and HLT
+// have been removed in this version. View the `main` branch for details on
+// the full IR.
 enum OP_CODES {
     // basic BF
     MOV,        // mov ptr
@@ -19,30 +25,14 @@ enum OP_CODES {
     BRZ,        // branch if zero
     BRNZ,       // branch if not zero
     SET,        // set value of cell
-
-    // math
-    INV,        // modular inverse of cell
-    MULINV,     // multiply by modular inverse
-    
-    // registers
-    PUTA,       // cell -> reg
-    PULLA,      // reg  -> cell
-    ACCUMA,     // cell + reg -> cell
-    MACMA,      // cel + regA*val -> cell
-    NCRAB,      // regA C val -> regB
-    NCBAB,      // regA C regB -> regB
-    MULRAB,     // reg + reg -> reg
-    INVRA,      // reg -> reg
-    PUTB,       // cell -> reg
-    PULLB,      // reg  -> cell
-    SWAP,       // swar reg
-    ACCUMB,     // cell + reg -> cell
-    MACMB,      // cel + regB*val -> cell
-    MULRBA,     // reg + reg -> reg
-    RKILL,      // put registers in an undefined state
-    INVRB,      // reg -> reg
-
     OUTC,       // outputs an ASCII charater
+
+    // register
+    PUTA,       // cell -> A
+    ACCUMA,     // cell + A -> cell
+    MACMA,      // cel + A*val -> cell
+    RKILL,      // put A in an undefined state
+    
     // additional control flow
     NOP,        // do nothing
     HLT,        // halt program
@@ -51,15 +41,12 @@ enum OP_CODES {
 
 #define has_four_byte_aux(c) \
     c == MOV    || c == ADD     || c == BRZ     || c == BRNZ    ||\
-    c == SET    || c == MULINV  || c == MACMA   || c == MACMB   ||\
-    c == NCRAB  || c == OUTC
+    c == SET    || c == MACMA   || c == OUTC
 
 inline const char* const op_name(uint8_t opc) {
     static const char* const cmd_names[] = {
-        "MOV     ", "ADD     ", "OUT     ", "IN      ", "BRZ     ", "BRNZ    ", "SET     ", "INV     ",
-        "MULINV  ", "PUTA    ", "PULLA   ", "ACCUMA  ", "MACMA   ", "NCRAB   ", "NCBAB   ", "MULRAB  ",
-        "INVRA   ", "PUTB    ", "PULLB   ", "SWAP    ", "ACCUMB  ", "MACMB   ", "MULRBA  ", "RKILL   ",
-        "INVRB   ", "OUTC    ", "NOP     ", "HLT     ",
+        "MOV     ", "ADD     ", "OUT     ", "IN      ", "BRZ     ", "BRNZ    ", "SET     ", "OUTC    ",
+        "PUTA    ", "ACCUMA  ", "MACMA   ", "RKILL   ", "NOP     ", "HLT     ",
     };
     return cmd_names[opc];
 }

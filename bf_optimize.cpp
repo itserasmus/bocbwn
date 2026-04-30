@@ -16,8 +16,8 @@
 // to a psych ward myself
 // 
 // The bfasm operations that may be used by this program are
-// MOV, ADD, OUT, IN, BRZ, BRNZ, SET, PUTA, ACCUMA, MACMA, NCRAB, MULRAB,
-// PUTB, ACCUMB, MACMB, RKILL, OUTC, NOP, HLT
+// MOV, ADD, OUT, IN, BRZ, BRNZ, SET, PUTA, ACCUMA, MACMA, RKILL, OUTC, NOP,
+// and HLT
 
 #include "bf.hpp"
 #include <cstdint>
@@ -48,28 +48,6 @@ inline uint8_t mod_inv(uint8_t x) {
     uint8_t t = x*(2-x*x);
     t = t*(2-t*x);
     return t;
-}
-
-uint8_t nCr(uint8_t n, uint8_t r) {
-    if(n < r) {return 0;}
-    if(r*2 > n) {r = n - r;}
-    uint8_t v2nCr = __builtin_popcount(r) + __builtin_popcount(n-r) - __builtin_popcount(n);
-    if(v2nCr >= 8) {return 0;}
-    uint8_t num_odd = 1;
-    uint8_t den_odd = 1;
-    uint8_t num_mult = n;
-    uint8_t den_mult = 1;
-    while(den_mult <= r) {
-        uint8_t tmp = num_mult >> (__builtin_ctz(num_mult));
-        num_odd *= tmp;
-        tmp = den_mult >> (__builtin_ctz(den_mult));
-        den_odd *= tmp;
-        num_mult++;
-        den_mult++;
-    }
-    num_odd *= mod_inv(den_odd);
-    num_odd = num_odd <<  v2nCr;
-    return num_odd;
 }
 
 
@@ -318,12 +296,6 @@ node treeify(vector<command>& commands, size_t begin, size_t end) {
     return root;
 }
 
-void fma_vec(vector<uint8_t>& a, vector<uint8_t>& b, uint8_t k) {
-    for(int i = 0; i < a.size(); i++) {
-        a[i] += k*b[i];
-    }
-}
-
 int clear_nop(vector<command>& commands) {
     size_t dst = 0;
     size_t src = 0;
@@ -563,8 +535,7 @@ void nuke_touched_values(const node& root, tape_metadata& tmd) {
             int32_t aux = child.cmd.aux;
             if(opc == MOV) {
                 tmd.mp_pos += aux; // since root is mov-balanced, mp_pos will return to 0
-            } else if(opc == ADD || opc == IN || opc == SET || opc == ACCUMA
-                || opc == MACMA || opc == ACCUMB || opc == MACMB) {
+            } else if(opc == ADD || opc == IN || opc == SET || opc == ACCUMA || opc == MACMA) {
                 // nuke it
                 tmd.mark_unknown();
             }
@@ -620,8 +591,6 @@ void simplified_pass(const node& root, tape_metadata& tmd) {
     if(root.basic_children) {
         bool regA_known = false;
         uint8_t regA;
-        bool regB_known = false;
-        uint8_t regB;
         for(const node& child : root.children) {
             uint8_t opc = child.cmd.opc;
             int32_t aux = child.cmd.aux;
@@ -660,45 +629,8 @@ void simplified_pass(const node& root, tape_metadata& tmd) {
                 } else if(!regA_known) {
                     tmd.mark_unknown();
                 }
-            } else if(opc == NCRAB) {
-                if(regA_known) {
-                    regB_known = true;
-                    regB = nCr(regA, (uint8_t)aux);
-                } else {
-                    regB_known = false;
-                }
-            } else if(opc == MULRAB) {
-                if(regA_known) {
-                    regB_known = true;
-                    regB = regA*regB;
-                } else {
-                    regB_known = false;
-                }
-            } else if(opc == PUTB) {
-                cell_value cell = tmd.get_val();
-                if(cell.known) {
-                    regB_known = true;
-                    regB = cell.val;
-                } else {
-                    regB_known = false;
-                }
-            } else if(opc == ACCUMB) {
-                cell_value cell = tmd.get_val();
-                if(regB_known && cell.known) {
-                    tmd.set_val(cell.val + regB);
-                } else if(!regB_known) {
-                    tmd.mark_unknown();
-                }
-            } else if(opc == MACMB) {
-                cell_value cell = tmd.get_val();
-                if(regB_known && cell.known) {
-                    tmd.set_val(cell.val + regB*(uint8_t)aux);
-                } else if(!regB_known) {
-                    tmd.mark_unknown();
-                }
             } else if(opc == RKILL) {
                 regA_known = false;
-                regB_known = false;
             } else if(opc == OUTC) {
                 // do nothing
             } else if(opc == NOP) {
@@ -840,8 +772,6 @@ void main_pass(node& root, tape_metadata& tmd) {
         if(root.basic_children) {
             bool regA_known = false;
             uint8_t regA;
-            bool regB_known = false;
-            uint8_t regB;
             for(node& child : root.children) {
                 uint8_t opc = child.cmd.opc;
                 int32_t aux = child.cmd.aux;
@@ -895,50 +825,8 @@ void main_pass(node& root, tape_metadata& tmd) {
                     } else if(regA_known && !cell.known) {
                         child.cmd = { ADD, (uint8_t)(regA*aux) };
                     }
-                } else if(opc == NCRAB) {
-                    if(regA_known) {
-                        regB_known = true;
-                        regB = nCr(regA, (uint8_t)aux);
-                    } else {
-                        regB_known = false;
-                    }
-                } else if(opc == MULRAB) {
-                    if(regA_known && regB_known) {
-                        regB = regA*regB;
-                    } else {
-                        regB_known = false;
-                    }
-                } else if(opc == PUTB) {
-                    cell_value cell = tmd.get_val();
-                    if(cell.known) {
-                        regB_known = true;
-                        regB = cell.val;
-                    } else {
-                        regB_known = false;
-                    }
-                } else if(opc == ACCUMB) {
-                    cell_value cell = tmd.get_val();
-                    if(regB_known && cell.known) {
-                        tmd.set_val(cell.val + regB);
-                        child.cmd = { SET, (uint8_t)(cell.val + regB) };
-                    } else if(!regB_known) {
-                        tmd.mark_unknown();
-                    } else if(regB_known && !cell.known) {
-                        child.cmd = { ADD, regB };
-                    }
-                } else if(opc == MACMB) {
-                    cell_value cell = tmd.get_val();
-                    if(regB_known && cell.known) {
-                        tmd.set_val(cell.val + regB*(uint8_t)aux);
-                        child.cmd = { SET, (uint8_t)(cell.val + regB*(uint8_t)aux) };
-                    } else if(!regB_known) {
-                        tmd.mark_unknown();
-                    } else if(regB_known && !cell.known) {
-                        child.cmd = { ADD, (uint8_t)(regB*aux) };
-                    }
                 } else if(opc == RKILL) {
                     regA_known = false;
-                    regB_known = false;
                 } else if(opc == OUTC) {
                     // do nothing
                 } else if(opc == NOP) {
@@ -1017,191 +905,7 @@ void main_pass(node& root, tape_metadata& tmd) {
         return;
     }
 
-    // we treat loops only containing MOV, ADD, SET, PUTA, ACCUMA, MACMA, RKILL, and NOP
-    // as possible candidates for unipotent affine loop solving (strictly speaking, basic
-    // mov-balanced unipotent homogeneous affine loop solving), or UALS for short
-    bool uals_candidate = !root.has_io;
-    for(size_t i = 0; uals_candidate && i < root.children.size(); i++) {
-        uint8_t opc = root.children[i].cmd.opc;
-        if(opc == MOV || opc == ADD || opc == SET || opc == PUTA || opc == ACCUMA
-            || opc == MACMA || opc == RKILL || opc == NOP) {
-        } else {
-            uals_candidate = false;
-        }
-    }
-    
-    // TODO: if uals_candidate, do UALS and early exit
-    if(uals_candidate) {
-        // first, we determine which cells are known at the start of each iteration in
-        // `known_at_end`
-        tape_metadata known_at_end;
-        const int32_t tmd_initial_mp_pos = tmd.mp_pos;
-        known_at_end.mp_pos = tmd_initial_mp_pos;
-        uint8_t loop_origin_addend = 0;
-
-        known_at_end.out_of_range_zero = false;
-        bool regA_known = false;
-        uint8_t regA;
-        // MOV, ADD, SET, PUTA, ACCUMA, MACMA, RKILL, NOP
-        for(node& child : root.children) {
-            uint8_t opc = child.cmd.opc;
-            int32_t aux = child.cmd.aux;
-            if(opc == MOV) {
-                known_at_end.mp_pos += aux;
-            } else if(opc == ADD) {
-                cell_value cell = known_at_end.get_val();
-                if(cell.known) {
-                    known_at_end.set_val(cell.val + aux);
-                }
-                if(known_at_end.mp_pos == tmd_initial_mp_pos) {
-                    loop_origin_addend += aux;
-                }
-            } else if(opc == SET) {
-                if(known_at_end.mp_pos == tmd_initial_mp_pos) {
-                    // it's now invalid for UALS
-                    goto end_of_if_statement_in_main_pass;
-                }
-                known_at_end.set_val(aux);
-            } else if(opc == PUTA) {
-                cell_value cell = known_at_end.get_val();
-                if(cell.known) {
-                    regA_known = true;
-                    regA = cell.val;
-                } else {
-                    regA_known = false;
-                }
-            } else if(opc == ACCUMA) {
-                cell_value cell = known_at_end.get_val();
-                if(cell.known && regA_known) {
-                    known_at_end.set_val(cell.val + regA);
-                } else {
-                    known_at_end.mark_unknown();
-                }
-                if(known_at_end.mp_pos == tmd_initial_mp_pos) {
-                    if(regA_known) {
-                        loop_origin_addend += regA;
-                    } else {
-                        goto end_of_if_statement_in_main_pass;
-                    }
-                }
-            } else if(opc == MACMA) {
-                cell_value cell = known_at_end.get_val();
-                if(cell.known && regA_known) {
-                    known_at_end.set_val(cell.val + regA*aux);
-                } else {
-                    known_at_end.mark_unknown();
-                }
-                if(known_at_end.mp_pos == tmd_initial_mp_pos) {
-                    if(regA_known) {
-                        loop_origin_addend += regA*aux;
-                    } else {
-                        goto end_of_if_statement_in_main_pass;
-                    }
-                }
-            } else if(opc == RKILL) {
-                regA_known = false;
-            } else if(opc == NOP) {
-                // do nothing (like... that's literally the point of the instruction)
-            } else {
-                nuke("ka-boom!");
-            }
-        }
-        if(known_at_end.mp_pos != tmd_initial_mp_pos) {
-            nuke("nothing can \"just work\", can it");
-        }
-        // In our this loop, we make sure the loop origin decrements by a known constant
-        // odd value. Thus, legal transformations on it are ADD and ACCUMA/MACMA if regA
-        // is known. SET and ACCUMA/MACMA with an unknown regA are illegal
-        if(loop_origin_addend % 2 == 0) {
-            goto end_of_if_statement_in_main_pass;
-        }
-        tmd.mp_pos = tmd_initial_mp_pos;
-        // now we create a square matrix of size num_variables+1
-        const uint32_t mat_size = known_at_end.accessed.size()+1;
-        if(mat_size >= MAX_UALS_MATRIX_SIZE) {
-            goto end_of_if_statement_in_main_pass;
-        }
-        vector<vector<uint8_t>> mat(mat_size, vector<uint8_t>(mat_size, 0));
-        // mat is row-major
-        // this matrix represents an affine transform (in homogeneous coordinates)
-        // over our set of varying cells (v). Let v_0 be the initial state of the tape
-        // and v_n be the state of the tape after n iterations of the loop, then,
-        // we can represent our loop as a transformation of the form
-        // v_{n+1} = Mv_n
-        // in homogeneous coordinates, obviously. First, we make sure that the loop
-        // origin (the cell at which the loop starts and ends) changes by a constant, odd
-        // number every iteration (we already did this). Then, we make sure that M is
-        // unipotent, allowing us to exponentiate it cleanly:
-        // v_n = M^n*v_0
-        // and since M = I + N where N is nilpotent (let N^(k+1) = 0),
-        // M^n = I + nC1*N + nC2*N^2 + nC3*N^3 ... nCk*N^k
-        // the reason we restrict ourselves to unipotent matrices is because (with some
-        // pre-processing) unipotent matrix exponentiation is very runtime-light, and
-        // unipotency is pretty much the strongest condition we can put if we want light
-        // runtime exponentiation
-        
-        unordered_map<int32_t, uint32_t> offset_to_i;
-        vector<int32_t> i_to_offset;
-        i_to_offset.reserve(mat_size-1);
-        uint32_t i = 0;
-        for(auto& [ind, cell] : known_at_end.accessed) {
-            // bidirectional mapping between offsets and indices
-            offset_to_i[ind] = i;
-            i_to_offset.push_back(ind);
-            i++;
-        }
-        for(int i = 0; i < mat_size-1; i++) {
-            known_at_end.mp_pos = i_to_offset[i];
-            cell_value cell = known_at_end.get_val();
-            if(cell.known) {
-                mat[i][mat_size-1] = cell.val;
-            } else {
-                mat[i][i] = 1;
-            }
-        }
-        mat[mat_size-1][mat_size-1] = 1;
-        
-        regA_known = false;
-        vector<uint8_t> regA_v(mat_size, 0);
-        int32_t mp_pos = tmd_initial_mp_pos;
-        // we no longer care about `known_at_end`, we simulate everything abstractly on `mat`
-
-        // MOV, ADD, SET, PUTA, ACCUMA, MACMA, RKILL, NOP
-        for(node& child : root.children) {
-            uint8_t opc = child.cmd.opc;
-            int32_t aux = child.cmd.aux;
-            if(opc == MOV) {
-                mp_pos += aux;
-            } else if(opc == ADD) {
-                mat[offset_to_i[mp_pos]][mat_size-1] += aux;
-            } else if(opc == SET) {
-                vector<uint8_t>& v = mat[offset_to_i[mp_pos]];
-                fill(v.begin(), v.end(), 0);
-                v.back() = aux;
-            } else if(opc == PUTA) {
-                regA_known = true;
-                regA_v = mat[offset_to_i[mp_pos]];
-            } else if(opc == ACCUMA) {
-                if(!regA_known) {
-                    goto end_of_if_statement_in_main_pass;
-                }
-                fma_vec(mat[offset_to_i[mp_pos]], regA_v, 1);
-            } else if(opc == MACMA) {
-                if(!regA_known) {
-                    goto end_of_if_statement_in_main_pass;
-                }
-                fma_vec(mat[offset_to_i[mp_pos]], regA_v, aux);
-            } else if(opc == RKILL) {
-                regA_known = false;
-            } else if(opc == NOP) {
-                // do nothing
-            }
-        }
-    }
-    end_of_if_statement_in_main_pass:
-
-    // first we nuke everything except SET
-    // ACCUMA, MACMA, ACCUMB, MACMB
+    // first we nuke everything except SET, ACCUMA, and MACMA
     
     tape_metadata tmd_dup = tmd;
     for(node& child : root.children) {
@@ -1218,13 +922,12 @@ void main_pass(node& root, tape_metadata& tmd) {
             }
         } else if(opc == IN) {
             tmd_dup.mark_unknown();
-        } else if(opc == OUT || opc == PUTA || opc == NCRAB || opc == MULRAB || opc == PUTB
-            || opc == RKILL || opc == OUTC || opc == NOP || opc == HLT) {
+        } else if(opc == OUT || opc == PUTA || opc == RKILL || opc == OUTC || opc == NOP || opc == HLT) {
             // do nothing
         } else if(opc == SET) {
             tmd_dup.set_val(aux);
             // tmd_dup.mark_unknown();
-        } else if(opc == ACCUMA || opc == MACMA || opc == ACCUMB || opc == MACMB) {
+        } else if(opc == ACCUMA || opc == MACMA) {
             // now, we _could_ simulate the registers, however, the registers allow a
             // cell to be modified by another cell, which would require possibly multiple
             // passes to resolve, so instead, we nuke it
@@ -1288,7 +991,6 @@ void dead_write_elimination(node& root) {
     
     // MOV, ADD, OUT, IN, SET, NOP, HLT
     bool regA_alive = true;
-    bool regB_alive = true;
     for(int i = root.children.size() - 1; i >= 0; i--) {
         uint8_t opc = root.children[i].cmd.opc;
         int32_t aux = root.children[i].cmd.aux;
@@ -1297,24 +999,10 @@ void dead_write_elimination(node& root) {
                 root.children[i].cmd.opc = NOP; // if it's dead, remove the operation
             }
             regA_alive = false;
-        } else if(opc == PUTB) {
-            if(!regB_alive) {
-                root.children[i].cmd.opc = NOP;
-            }
-            regB_alive = false;
-        } else if(opc == NCRAB || opc == MULRAB) {
-            if(!regB_alive) {
-                root.children[i].cmd.opc = NOP;
-            }
-            regB_alive = false;
-            regA_alive = true;
         } else if(opc == RKILL) {
             regA_alive = false;
-            regB_alive = false;
         } else if(opc == ACCUMA || opc == MACMA) {
             regA_alive = true;
-        } else if(opc == ACCUMB || opc == MACMB) {
-            regB_alive = true;
         } else if(opc == MOV || opc == ADD || opc == OUT || opc == IN || opc == SET
             || opc == OUTC || opc == NOP || opc == HLT) {
             // do nothing
@@ -1336,16 +1024,16 @@ void dead_write_elimination(node& root) {
             } else {
                 dead.insert(mp);
             }
-        } else if(opc == OUT || opc == PUTA || opc == PUTB) {
+        } else if(opc == OUT || opc == PUTA) {
             dead.erase(mp);
         } else if(opc == MOV) {
             mp -= aux;  // negative because we're doing a reverse iteration, although it
                         // doesn't actually matter at all since > and < are symmetric in BF
-        } else if(opc == ADD || opc == ACCUMA || opc == MACMA || opc == ACCUMB || opc == MACMB) {
+        } else if(opc == ADD || opc == ACCUMA || opc == MACMA) {
             if(dead.find(mp) != dead.end()) {
                 root.children[i].cmd.opc = NOP; // remove these
             }
-        } else if(opc == NCRAB || opc == MULRAB || opc == RKILL || opc == OUTC || opc == NOP
+        } else if(opc == RKILL || opc == OUTC || opc == NOP
             || opc == HLT) {
             // do nothing
         }
@@ -1366,11 +1054,11 @@ void strength_reduction(node& root) {
         return;
     }
 
-    // removes MOV 0, ADD 0, MACMA 0, and MACMB 0
+    // removes MOV 0, ADD 0, and MACMA 0
     for(node& child : root.children) {
         uint8_t opc = child.cmd.opc;
         uint32_t aux = child.cmd.aux;
-        if(opc == MOV || opc == ADD || opc == MACMA || opc == MACMB) {
+        if(opc == MOV || opc == ADD || opc == MACMA) {
             if(aux == 0) {
                 child.cmd.opc = NOP;
             }
@@ -1416,7 +1104,7 @@ void strength_reduction(node& root) {
                 }
             }
             curr_instr++;
-        } else if(curr_opc == NCRAB || curr_opc == MULRAB || curr_opc == RKILL || curr_opc == OUTC
+        } else if(curr_opc == RKILL || curr_opc == OUTC
             || curr_opc == NOP) {
             curr_instr++;
         } else {
