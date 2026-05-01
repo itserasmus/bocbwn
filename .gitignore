@@ -1,6 +1,7 @@
 bf/*
 !bf/*.*
 
+*.exe
 *.bfvm
 *.bfasm
 *.s
