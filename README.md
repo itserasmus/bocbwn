@@ -99,8 +99,8 @@ clang++ bf_tpr.cpp -o bf_tpr -O3
 clang++ bf_cmpr.cpp -o bf_cmpr -O3
 ```
 
-Then, to compile a brainfuck file you may use either the provided script in `bfcpl` for Unix-like
-environments including MSYS2, or the `bfcpl` command in `shell.nix` for NixOS users. Alternatively,
+Then, to compile a brainfuck file you may use either the provided script `bfcpl` for Unix-like
+environments including MSYS2.
 if you are a Windows user, you may
 use:
 ```bash

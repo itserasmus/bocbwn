@@ -1,4 +1,10 @@
-*.exe
+bf/*
+!bf/*.*
+
 *.bfvm
 *.bfasm
 *.s
+build/
+bin/
+
+bf_cmplr

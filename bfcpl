@@ -1,23 +1,138 @@
 #!/usr/bin/env bash
-set -e  # exit on error
+
+set -eou pipefail
 
 name="$1"
 
-if [ -z "$name" ]; then
-    echo "Usage: bfcpl <file-without-extension>"
+if [[ -z "$name" ]]; then
+    echo "Usage: bfcpl <file.bf> [-o file] [-flags]"
     exit 1
 fi
+shift
 
-# clang++ bf_tpr.cpp -o bf_tpr.exe
-clang++ bf_cmpr.cpp -o bf_cmpr.exe
+output=""
+rec_opt=false
+rec_abe=false
+rec_cmplr=false
 
-if [[ "$2" == "-asm" ]]; then
-    ./bf_tpr.exe "$name.bf" -asm
-    exit 0
+in_type=0   # 0 = bf;   1 = bfvm
+out_type=-1 # 0 = bfvm; 1 = bfasm;  2 = exec
+
+opt_lvl=0   # clang++'s optimization level
+
+cmplr_flags=()  # apparently bash has arrays
+
+
+if [[ "$name" == *.bfvm ]]; then
+    in_type=1
 fi
 
-./bf_tpr.exe "$name.bf"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o)
+            shift
+            if [[ -z "$1" ]]; then
+                echo "No file name after -o"
+                exit 1
+            fi
+            output="$1"
+            ;;
+        -r-opt)
+            rec_opt=true
+            ;;
+        -r-abe)
+            rec_abe=true
+            ;;
+        -r-cmplr)
+            rec_cmplr=true
+            ;;
+        -in=*)
+            str="${1:4}"
+            case "$str" in
+                bf|brainfuck)
+                    in_type=0 ;;
+                bfvm)
+                    in_type=1 ;;
+                *)
+                    echo "Invalid -in value: $str"
+                    exit 1 ;;
+            esac
+            ;;
+        -out=*)
+            str="${1:5}"
+            case "$str" in
+                bfvm)
+                    out_type=0 ;;
+                asm|bfasm)
+                    out_type=1 ;;
+                exe|exec)
+                    out_type=2 ;;
+                *)
+                    echo "Invalid -out value: $str"
+                    exit 1 ;;
+            esac
+            ;;
+        -O*)
+            str="${1:2}"
+            case "$str" in
+                0|1|2|3)
+                    opt_lvl="$str" ;;
+                *)
+                    echo "Invalid Optimization Level: $str"
+                    exit 1 ;;
+            esac
+            ;;
+        --*)
+            str="${1:1}"
+            cmplr_flags+=("$str")
+            ;;
+        *)
+            echo "Invalid argument: $1"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
-./bf_cmpr.exe "$name.bfvm"
+if [[ -z "$output" ]]; then
+    output="${name%.*}"
+fi
+if [[ "$out_type" -eq -1 ]]; then
+    case "$output" in
+        *bfvm)
+            out_type=0 ;;
+        *.bfasm)
+            out_type=1 ;;
+        *)
+            out_type=2 ;;
+    esac
+fi
 
-clang++ bf_asm.cpp "$name.s" -o "$name.exe"
+
+build_obj() {   # this primitive language has functions too
+    local src="$1"
+    local obj="$2"
+    local force="$3"
+
+    if [[ "$force" == true || ! -f "$obj" || "$src" -nt "$obj" ]]; then
+        clang++ -c "$src" -o "$obj" "-O$opt_lvl"
+        return 0
+    fi
+    return 1
+}
+
+rec_everything=false
+build_obj src/bf_optimize.cpp   build/bf_optimize.o "$rec_opt"      &&  rec_everything=true
+build_obj src/bf_asm_be.cpp     build/bf_asm_be.o   "$rec_abe"      &&  rec_everything=true
+build_obj src/bf_cmplr.cpp      build/bf_cmplr.o    "$rec_cmplr"    &&  rec_everything=true
+
+if [[ "$rec_everything" ]]; then
+    clang++ build/bf_cmplr.o build/bf_asm_be.o build/bf_optimize.o -o bf_cmplr "-O$opt_lvl"
+fi
+
+if [[ "$out_type" -eq 2 ]]; then
+    ./bf_cmplr "$name" -o "$output.s" "-in=$in_type" "-out=2" "${cmplr_flags[@]}"
+    clang++ src/bf_asm.cpp "$output.s" -o "$output"
+else
+    ./bf_cmplr "$name" -o "$output" "-in=$in_type" "-out=$out_type" "${cmplr_flags[@]}"
+fi

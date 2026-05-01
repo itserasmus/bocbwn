@@ -1,6 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
+#include <string>
+
+
+using namespace std;
 
 
 struct command {
@@ -58,4 +63,8 @@ inline const char* const op_name(uint8_t opc) {
 #else
     #define nuke(str) __builtin_unreachable()
 #endif
+
+
+int dump_assembly(string&, vector<command>&, bool);
+int optimize(vector<command>&, bool);
 

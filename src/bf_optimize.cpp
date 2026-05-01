@@ -1107,9 +1107,7 @@ void strength_reduction(node& root) {
 
 
 
-int optimize(vector<command>& commands, int optimization_level, bool tape_empty) {
-    if(optimization_level < 1) {return 0;}
-
+int optimize(vector<command>& commands, bool tape_empty) {
     // first pass, it groups together (+/-) and (>/<)
     size_t add_chain_start = 0;
     size_t mov_chain_start = 0;
