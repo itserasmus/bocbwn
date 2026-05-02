@@ -2,7 +2,7 @@
 
 set -eou pipefail
 
-name="$1"
+name="${1:-}"
 
 if [[ -z "$name" ]]; then
     echo "Usage: bfcpl <file.bf> [-o file] [-flags]"
@@ -15,6 +15,9 @@ rec_opt=false
 rec_abe=false
 rec_cmplr=false
 save_asm=false
+run_exec=false
+
+verbose=false
 
 in_type=0   # 0 = bf;   1 = bfvm
 out_type=-1 # 0 = bfvm; 1 = bfasm;  2 = exec
@@ -49,6 +52,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         -sasm)
             save_asm=true
+            ;;
+        -run)
+            run_exec=true
+            ;;
+        -v|-verbose)
+            verbose=true
             ;;
         -in=*)
             str="${1:4}"
@@ -99,9 +108,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 
-if [[ -z "$output" ]]; then
-    output="${name%.*}"
-fi
 if [[ "$out_type" -eq -1 ]]; then
     case "$output" in
         *bfvm)
@@ -111,6 +117,22 @@ if [[ "$out_type" -eq -1 ]]; then
         *)
             out_type=2 ;;
     esac
+    [[ "$verbose" == true ]] && echo "No output type given, inferring $out_type"
+fi
+if [[ -z "$output" ]]; then
+    output="${name%.*}"
+    case "$out_type" in
+        0)
+            output="$output.bfvm"
+            ;;
+        1)
+            output="$output.bfasm"
+            ;;
+        2)
+            # output="$output"
+            ;;
+    esac
+    [[ "$verbose" == true ]] && echo "No output file given, outputting to $output"
 fi
 
 
@@ -120,17 +142,23 @@ build_obj() {   # this primitive language has functions too
     local force="$3"
 
     if [[ "$force" == true || ! -f "$obj" || "$src" -nt "$obj" ]]; then
+        [[ "$verbose" == true ]] && echo "Recompiling file $src to $obj"
         clang++ -c "$src" -o "$obj" "-O$opt_lvl"
         return 0
     fi
     return 1
 }
 
-if [[ src/bf.hpp -nt bf_optimize.o || src/bf.hpp -nt bf_asm_be.o
-    || src/bf.hpp -nt bf_cmplr.o ]]; then
+if [[ src/bf.hpp -nt build/bf_optimize.o || src/bf.hpp -nt build/bf_asm_be.o
+    || src/bf.hpp -nt build/bf_cmplr.o ]]; then
     rec_opt=true
     rec_abe=true
     rec_cmplr=true
+fi
+
+if [[ ! -d build ]]; then
+    [[ "$verbose" == true ]] && echo "build/ does not exist, creating it"
+    mkdir -p build
 fi
 
 rec_everything=false
@@ -143,18 +171,26 @@ out_asm="$output.s"
 
 if [[ "$save_asm" == false ]]; then
     out_asm=$(mktemp "/tmp/bf_asm_XXXXXX.s")
+    [[ "$verbose" == true ]] && echo "Storing temporary assembly file in $out_asm"
 fi
 
 
-if [[ "$rec_everything" ]]; then
+if [[ "$rec_everything" == true || ! -f bf_cmplr ]]; then
+    [[ "$verbose" == true ]] && echo "Recompiling bf_cmplr"
     clang++ build/bf_cmplr.o build/bf_asm_be.o build/bf_optimize.o -o bf_cmplr "-O$opt_lvl"
 fi
 
+[[ "$verbose" == true ]] && echo "Compiling $name to $output"
 if [[ "$out_type" -eq 2 ]]; then
     ./bf_cmplr "$name" -o "$out_asm" "-in=$in_type" "-out=2" "${cmplr_flags[@]}"
     clang++ src/bf_asm.cpp "$out_asm" -o "$output"
     if [[ "$save_asm" == false ]]; then
         rm -f "$out_asm"
+    fi
+    if [[ "$run_exec" == true ]]; then
+        [[ "$verbose" == true ]] && echo "Running ./$output
+---------------------------------------"
+        "./$output"
     fi
 else
     ./bf_cmplr "$name" -o "$output" "-in=$in_type" "-out=$out_type" "${cmplr_flags[@]}"
