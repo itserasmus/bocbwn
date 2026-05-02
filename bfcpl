@@ -126,6 +126,13 @@ build_obj() {   # this primitive language has functions too
     return 1
 }
 
+if [[ src/bf.hpp -nt bf_optimize.o || src/bf.hpp -nt bf_asm_be.o
+    || src/bf.hpp -nt bf_cmplr.o ]]; then
+    rec_opt=true
+    rec_abe=true
+    rec_cmplr=true
+fi
+
 rec_everything=false
 build_obj src/bf_optimize.cpp   build/bf_optimize.o "$rec_opt"      &&  rec_everything=true
 build_obj src/bf_asm_be.cpp     build/bf_asm_be.o   "$rec_abe"      &&  rec_everything=true

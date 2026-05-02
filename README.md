@@ -95,8 +95,7 @@ sequence of assembly instructions
 BOCBWN can be compiled and used with any standard C++ compiler. It must be set up by compiling the
 files to executables as shown, with the compiler of your choice.
 ```bash
-clang++ bf_tpr.cpp -o bf_tpr -O3
-clang++ bf_cmpr.cpp -o bf_cmpr -O3
+clang++ bf_cmplr.cpp -o bf_cmplr(.exe) -O3
 ```
 
 Then, to compile a brainfuck file you may use either the provided script `bfcpl` for Unix-like
@@ -104,9 +103,8 @@ environments including MSYS2.
 if you are a Windows user, you may
 use:
 ```bash
-./bf_tpr foo.bf
-./bf_cmpr foo.bfvm
-clang++ bf_asm.cpp foo.s -o foo
+./bf_cmplr foo.bf -o foo.s
+clang++ bf_asm.cpp foo.s -o foo.exe
 ```
 
 to compile a brainfuck program `foo.bf` and run it with `./foo`. Four example programs, a hello

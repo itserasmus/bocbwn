@@ -121,7 +121,7 @@ run:
 
     mov %rcx, %rbx
     mov %rdx, %rbp
-    xor %rdi, %rdi
+    xor %r14, %r14
 
 )";
     static const char* const epilogue = R"(
@@ -182,7 +182,7 @@ run:
                 break;
             case MACMA:
                 fo << "    movb $" << cmd.aux << ", %al\n    mulb %r12b\n\
-    addb %al, (%rbx,%rdi)\n";
+    addb %al, (%rbx,%r14)\n";
                 break;
             case RKILL:
                 break;
