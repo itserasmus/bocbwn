@@ -5,7 +5,9 @@ bf/*
 *.bfvm
 *.bfasm
 *.s
-build/
-bin/
+build/*
+bin/*
+.vscode/
 
 bf_cmplr
+

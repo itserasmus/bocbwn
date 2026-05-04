@@ -80,14 +80,16 @@ public:
      * even if it starts a sentence).
      * Nobles live in the callee-saved registers. If the user attempts to allocate more Nobles than
      * the number of caller-saved registers, `RegMan` will throw a runtime error. Nobles can only
-     * be evicted by the user.
+     * be deallocated by the user.
      * peasants can live in both the callee-saved registers or the caller-saved registers. peasants
      * which live in caller-saved registers are called serfs. peasants must provide a priority and
      * an eviction callback. 
+     * Deallocation does not trigger the eviction callback.
      */
     
-    void noble_evict_fn(void* _) {
-        throw std::runtime_error("The aristocracy has fallen.");
+    static void noble_evict_fn(void*) {
+        cerr << "The aristocracy has fallen." << endl;
+        exit(1);
     }
     struct Register {
         GPR loc;
@@ -117,7 +119,9 @@ public:
         }
     }
 
-    Register* allocate_noble(GPR pref);
+    Register* allocate_noble(GPR pref = NUM_GPR) {
+        
+    }
 
 };
 
@@ -137,6 +141,7 @@ int dump_assembly(string& output_file_name, vector<command>& commands, bool assu
 .extern getchar
 
 run:
+    # prologue
 )";
     RegMan rm;
 
@@ -145,6 +150,9 @@ run:
     for(GPR reg : RegMan::callee_saved) {
         fo << "    push " << QR[reg] <<"\n";
     }
+#if !COMPILE_FOR_SYS_V
+    fo << "    sub $32, %rsp # reserve shadow space\n";
+#endif
     static_assert(RegMan::argument_reg.size() >= 2, "not enough argument registers");
     fo << "\n    mov " << QR[RegMan::argument_reg[0]] << ", " << QR[RBX]
         << "\n    mov " << QR[RegMan::argument_reg[1]] << ", " << QR[RBP]
@@ -162,10 +170,10 @@ run:
                 fo << "    addb $" << cmd.aux << ", (%rbx,%r14)\n";
                 break;
             case OUT:
-                fo << "    movzbl (%rbx,%r14), %edi\n    call putchar\n";
+                fo << "    movzbl (%rbx,%r14), %ecx\n    call putchar\n";
                 break;
             case OUTC:
-                fo << "    movl $" << cmd.aux << ", %edi\n    call putchar\n";
+                fo << "    movl $" << cmd.aux << ", %ecx\n    call putchar\n";
                 break;
             case IN:
                 fo << "    call getchar\n    movb %al, (%rbx,%r14)\n";
@@ -207,13 +215,17 @@ run:
     }
     
     fo << R"(
+    # epilogue
 .epilogue:
 )";
+#if !COMPILE_FOR_SYS_V
+    fo << "    add $32, %rsp # free shadow space\n";
+#endif
     for(int i = RegMan::callee_saved.size()-1; i >= 0; i--) {
         fo << "    pop " << QR[RegMan::callee_saved[i]] <<"\n";
     }
     fo << "    ret\n";
-#ifdef COMPILE_FOR_SYS_V
+#if COMPILE_FOR_SYS_V
     fo << "\n\n.section .note.GNU-stack,\"\",@progbits\n";
 #endif
 

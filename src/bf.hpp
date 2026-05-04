@@ -59,7 +59,7 @@ inline const char* const op_name(uint8_t opc) {
     #define NUKE_ON_ENTER true
 #endif
 #if NUKE_ON_ENTER
-    #define nuke(str) cout << str << endl; exit(1)
+    #define nuke(str) cerr << str << endl; exit(1)
 #else
     #define nuke(str) __builtin_unreachable()
 #endif
