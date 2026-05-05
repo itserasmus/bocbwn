@@ -64,8 +64,7 @@ follows.
 
 1. tape (t): This is a bi-infinite tape of unisgned, wrapping integers. This can be modelled as a function t:Z->Z/nZ
 2. pointer (p): This is an integer, and can be modelled as p in Z
-3. stdin (i): This is either a finite or infinite tuple, modelled as i:{1..|i|}->Z/nZ or i:W->Z/nZ for a finite or
-    infinite tuple respectively.
+3. stdin (i): This is either a finite or infinite tuple, modelled as i:{1..|i|}->Z/nZ.
 4. stdout (o): This is a finite tuple, modelled as o:{1..|o|}->Z/nZ.
 5. register (r): Currently, r consists of only one register, A. Thus, r is modelled as r:{A}->(Z/nZ U {void}).
 
@@ -327,6 +326,29 @@ Proof:
 
 ### 4.2. Lemmas on the State Model
 
+Now, we prove lemmas on the State Model introduced in section 3.1.
+
+First, we rigorously define the states
+
+VState = {(t,p,i,o,r): t:Z->Z/nZ & p in Z & i:(1..x)->Z/nZ & o:(1..y)->Z/nZ & r:{A}->Z/nZ, x in N U {N}, y in N}
+TState = {(fin,t,p,o): t:Z->(Z/nZ U {void}) & p in (Z U {void}) & o:(1..y)->(Z/nZ U {void}), y in N U {N}}
+IState = {(inv)}
+
+State = VState U TState U IState
+
+for the remainder of this markdown, we will, usually explicitly but possibly implicitly use S, V, and T to represent
+arbitrary members of State, VState, and TState.
+
+
+1. The state partition is disjoint
+    VState n TState = VState n IState = TState n IState = {}
+Proof:
+    x in VState & x in TState => (1,fin) !in x & (1,fin) in x
+    x in VState & x in IState => (1,inv) !in x & (1,inv) in x
+    x in TState & x in IState => (1,inv) !in x & (1,inv) in x
+
+
+2. VStates are entirely deter
 
 
 
