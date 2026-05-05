@@ -3,6 +3,8 @@
 BOCBWN is an optimizing compiler for brainfuck, one of the first esoteric programming languages,
 which despite its minimal syntax, [is turing complete](https://en.wikipedia.org/wiki/Brainfuck).
 
+BOCBWN comes with a (work in progress) proof of correctness of all its parts*, in `proofs/`!
+
 For usage, skip directly to [BOCBWN Usage](#bocbwn-usage)
 
 
