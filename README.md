@@ -3,10 +3,12 @@
 BOCBWN is an optimizing compiler for brainfuck, one of the first esoteric programming languages,
 which despite its minimal syntax, [is turing complete](https://en.wikipedia.org/wiki/Brainfuck).
 
-BOCBWN comes with a (work in progress) proof of correctness of all its parts*, in `proofs/`!
+BOCBWN comes with a (work in progress) proof of correctness of all its parts^[^1], in `proofs/`!
 
 For usage, skip directly to [BOCBWN Usage](#bocbwn-usage)
 
+[^1]: the proofs provided are proofs that the methods used in BOCBWN are sound, and while the
+implementation follows relatively trivially from the intent, the implementations are not proved.
 
 ## Brainfuck Specification
 
@@ -116,3 +118,4 @@ adventure game Lost Kingdom (`lk.bf` by
 [Jon Ripley](https://jonripley.com/i-fiction/games/LostKingdomBF)) are included. You can find more
 info on brainfuck at [the page on esolangs.org](https://esolangs.org/wiki/Brainfuck) and more
 programs written in brainfuck at [brainfuck.org](https://brainfuck.org/).
+
