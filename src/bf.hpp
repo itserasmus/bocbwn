@@ -18,7 +18,7 @@ struct command {
 // and HLT
 // have been removed in this version. View the `main` branch for details on
 // the full IR.
-enum OP_CODES {
+enum OP_CODES : uint8_t {
     // basic BF
     MOV,        // mov ptr
     ADD,        // add fixed value to cell
