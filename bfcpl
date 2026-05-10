@@ -155,6 +155,10 @@ if [[ src/bf.hpp -nt build/bf_optimize.o || src/bf.hpp -nt build/bf_asm_be.o
     rec_abe=true
     rec_cmplr=true
 fi
+if [[ src/bf_asm_be_asm_man.cpp -nt build/bf_asm_be.o ]]; then
+    rec_abe=true
+fi
+
 
 if [[ ! -d build ]]; then
     [[ "$verbose" == true ]] && echo "build/ does not exist, creating it"

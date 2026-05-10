@@ -45,7 +45,7 @@ enum OP_CODES : uint8_t {
     c == MOV    || c == ADD     || c == BRZ     || c == BRNZ    ||\
     c == SET    || c == MACMA   || c == OUTC
 
-inline const char* const op_name(uint8_t opc) {
+inline const char* op_name(uint8_t opc) {
     static const char* const cmd_names[] = {
         "MOV     ", "ADD     ", "OUT     ", "IN      ", "BRZ     ", "BRNZ    ", "SET     ", "OUTC    ",
         "PUTA    ", "ACCUMA  ", "MACMA   ", "RKILL   ", "NOP     ", "HLT     ",

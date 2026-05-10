@@ -18,12 +18,42 @@ using namespace std;
 static_assert(COMPILE_FOR_SYS_V == 0 || COMPILE_FOR_SYS_V == 1, "COMPILE_FOR_SYS_V must be 0 or 1");
 
 
+
+
+
+static inline bool is_pow2_u64(uint64_t v) {
+    return v && !(v & (v - 1));
+}
+
+static inline uint32_t log2_uint64(uint64_t v) { // nonzero input only
+    return 63 - __builtin_clzll(v);
+}
+
+static inline uint32_t rem_pow2_uint64(uint64_t v) { // nonzero input only
+    return v >> (__builtin_ctzll(v));
+}
+
+static inline uint32_t v2_uint64(uint64_t v) { // again, nonzero input only
+    return __builtin_ctzll(v);
+}
+
+
+
+
+
 enum reg_size : uint8_t {
     byte_r,
     word_r,
     dword_r,
     quad_r
 };
+
+static inline reg_size promote_reg(reg_size reg, reg_size min) {
+    return reg > min ? reg : min;
+}
+static inline uint64_t reg_mask(reg_size reg) {
+    return reg == byte_r ? 0xFF : reg == word_r ? 0xFFFF : reg == dword_r ? 0xFFFFFFFF : 0xFFFFFFFFFFFFFFFF;
+}
 
 // if you ever change this, change everything related to it too... or just... don't.
 enum GPR : uint8_t {
@@ -52,12 +82,12 @@ static_assert(QR.size() == NUM_GPR
     && WR.size() == NUM_GPR
     && BR.size() == NUM_GPR, "invalid register name format");
 
-const string RgeName(GPR reg, reg_size size) {
+const string& RegName(GPR reg, reg_size size) {
     return (size == byte_r ? BR : size == word_r ? WR : size == dword_r ? DR : QR)[reg];
 };
 
 enum AsmOpc : uint8_t {
-    addx, mulx, movx, movzxq, call, cmpx, label, jz, jnz, jmp
+    addx, andx, imulx, movx, movzxq, call, cmpx, label, jz, jnz, jmp
 };
 
 struct Loc {
@@ -66,13 +96,31 @@ struct Loc {
         GPR r;
         uint64_t i;
         struct {
-            int32_t off;
-            GPR head;
-            GPR offset;
-            uint8_t stride;
+            int32_t disp;
+            GPR base;
+            GPR index;
+            uint8_t scale;
         };
     };
+    
+    Loc() {};
+    explicit Loc(GPR reg_) : type(reg), r(reg_) {};
+    explicit Loc(uint64_t imm_) : type(imm), i(imm_) {};
+    Loc(int32_t disp, GPR base, GPR index = NUM_GPR, uint8_t scale = 1)
+        : type(mem), disp(disp), base(base), index(index), scale(scale) {};
 };
+
+
+bool loc_equal(Loc a, Loc b) {
+    if(a.type != b.type) {return false;}
+    if(a.type == Loc::imm) {return a.i == b.i;}
+    if(a.type == Loc::reg) {return a.r == b.r;}
+    if(a.type == Loc::mem) {
+        return a.disp == b.disp && a.base == b.base && a.index == b.index && a.scale == b.scale;
+    }
+    __builtin_unreachable();;
+}
+
 
 struct AsmInstr {
     AsmOpc opc;
@@ -81,12 +129,19 @@ struct AsmInstr {
         struct {
             Loc src;
             Loc dst;
-        }; // addx, mulx, movx, movxzq, cmpx
+            uint64_t imm; // for imulx
+            bool three_op; // also for imulx
+        }; // addx, imulx, movx, movxzq, cmpx
         uint64_t uid; // call, label, jz, jnz, jmp
     };
 };
 
+vector<string> asm_name_by_uid;
 
+uint64_t create_function(const string& s) {
+    asm_name_by_uid.push_back(s);
+    return asm_name_by_uid.size() - 1;
+}
 
 class AsmMan {
 public:
@@ -167,6 +222,34 @@ public:
 
 
 
+    inline void push_instr(AsmOpc opc, reg_size size, const Loc& src, const Loc& dst = Loc(), uint64_t imm = 0,
+        bool three_op = false, bool touch = true) {
+        asm_cmd.push_back({
+            .opc = opc,
+            .size = size,
+            .src = src,
+            .dst = dst,
+            .imm = imm,
+            .three_op = three_op
+        });
+        // mark registers as touched
+        if(touch && src.type == Loc::reg && src.r < NUM_GPR) { // NUM_GPR is a (empty) sentinel
+            registers[src.r].last_used = ++counter; // if not allocated out, then last_used is garbage anyway
+        }
+        if(touch && dst.type == Loc::reg && dst.r < NUM_GPR) {
+            registers[dst.r].last_used = ++counter; // if both src & dst are there, then dst gets a
+                // higher "priority"
+        }
+    }
+    inline void push_instr(AsmOpc opc, uint64_t uid) {
+        asm_cmd.push_back({
+            .opc = opc,
+            .uid = uid
+        });
+    }
+
+
+
     void allocate_noble(Register*& handle, EvictFn evict,  reg_size size = dword_r, GPR pref = NUM_GPR) {
         GPR reg = NUM_GPR;
 
@@ -214,12 +297,13 @@ public:
                 registers[peasant_crsr_ind].evict(&registers[peasant_crsr_ind]);
                 registers[peasant_crsr_ind] = registers[peasant_cesr_ind];
                 *registers[peasant_crsr_ind].held = &registers[peasant_crsr_ind];
-                asm_cmd.push_back({
-                    .opc = movx,
-                    .size = registers[peasant_crsr_ind].size,
-                    .src  = Loc{ Loc::reg, (GPR)peasant_cesr_ind },
-                    .dst  = Loc{ Loc::reg, (GPR)peasant_crsr_ind }
-                });
+                push_instr(
+                    movx,
+                    registers[peasant_crsr_ind].size,
+                    Loc((GPR)peasant_cesr_ind),
+                    Loc((GPR)peasant_crsr_ind),
+                    0, false, false
+                );
             } else {
                 registers[peasant_cesr_ind].evict(&registers[peasant_cesr_ind]);
             }
@@ -326,14 +410,235 @@ public:
         }
     }
 
-    void dump_assembly(ofstream of) {
-        // handles only the assembly inside the function, user must generate the boilerplate and labels
-        // addx, mulx, movx, movzxq, call, cmpx, label, jz, jnz, jmp
+    const string loc_str(const Loc& loc, reg_size size) const {
+        switch(loc.type) {
+            case Loc::reg:
+                return RegName(loc.r, size);
+            case Loc::imm:
+                return "$" + to_string(loc.i);
+            case Loc::mem: {
+                string out;
+                if(loc.disp) {
+                    out += to_string(loc.disp);
+                }
+
+                out += "(";
+                out += RegName(loc.base, quad_r);
+                if(loc.index != NUM_GPR) {
+                    out += ",";
+                    out += RegName(loc.index, quad_r);
+
+                    if(loc.scale != 1) {
+                        out += ",";
+                        out += to_string(loc.scale);
+                    }
+                }
+                out += ")";
+                return out;
+            }
+        }
+    }
+
+    void dump_assembly(ofstream& of) {
+        // handles only the assembly inside the function, user must generate the boilerplate and entrypoint
+        // addx, imulx, movx, movzxq, call, cmpx, label, jz, jnz, jmp
+
+        static const constexpr char suffix[] = "bwlq"; // since byte_r = 1, not 0
+
+        string src;
+        string dst;
+        reg_size size;
         for(AsmInstr& ins : asm_cmd) {
             switch(ins.opc) {
-                case addx:
-                    
-                    break;
+                case addx: {
+                    if(ins.src.type == Loc::imm && ins.src.imm == 0) {continue;}
+                    size = ins.dst.type == Loc::mem ? ins.size : promote_reg(ins.size, dword_r);
+                    of << "    add" << suffix[size] << " " << loc_str(ins.src, size)
+                        << ", " << loc_str(ins.dst, size) << "\n";
+                    break;}
+                case andx: {
+                    if(ins.src.type == Loc::imm && ins.src.imm == 0) {continue;}
+                    size = ins.dst.type == Loc::mem ? ins.size : promote_reg(ins.size, dword_r);
+                    of << "    and" << suffix[size] << " " << loc_str(ins.src, size)
+                        << ", " << loc_str(ins.dst, size) << "\n";
+                    break;}
+                case imulx: {
+                    // Tthe unholy offspring of lightning and death itself. Your only hope, hide, and pray it
+                    // does not find you.
+                    size = ins.dst.type == Loc::mem ? ins.size : promote_reg(ins.size, dword_r);
+                    src = loc_str(ins.src, size);
+                    dst = loc_str(ins.dst, size);   // imulx $imm, (mem), (mem) is illegal both in x86 and the IR
+
+                    uint64_t mult_mask = reg_mask(ins.size);
+                    uint64_t mult = ins.three_op ? ins.imm : ins.src.imm;
+                    mult = mult & mult_mask;
+                    uint64_t odd_mult = mult == 0 ? 0 : rem_pow2_uint64(mult); // rem_pow2_uint64 cannot accept 0
+                    // one shl, one lea, two shl, or one lea then one shl, are cheaper than imul
+                    // one mov and lea/shl+lea/shl may or may not be cheaper -> don't do it
+                    if(!ins.three_op) {
+                        if(ins.src.type != Loc::imm) {
+                            of << "    imul" << suffix[size] << " " << src << ", " << dst << "\n";
+                            continue;
+                        }
+                        if(mult == 0) {
+                            if(ins.dst.type == Loc::mem) {
+                                of << "    mov" << suffix[size] << " $0, " << dst << "\n";
+                            } else {
+                                of << "    xor" << suffix[size] << " " << dst << ", " << dst << "\n";
+                            }
+                        } else if(mult == 1) {
+                            // kill on sight
+                        } else if(mult == mult_mask) {
+                            of << "    neg" << suffix[size] << " " << dst << "\n";
+                        } else if(is_pow2_u64(mult)) {
+                            of << "    shl" << suffix[size] << " $" << log2_uint64(mult) << ", " << dst << "\n";
+                        } else if(ins.dst.type == Loc::reg && (odd_mult == 3 || odd_mult == 5 || odd_mult == 9)) {
+                            // I could swear you had... ..._teeth!_
+                            string tmp_dst = loc_str(ins.dst, quad_r);
+                            of << "    lea (" << tmp_dst << "," << tmp_dst << "," << (odd_mult-1) << "), " << dst << "\n";
+                            if(odd_mult != mult) {
+                                of << "    shl" << suffix[size] << " $" << v2_uint64(mult) << ", " << dst << "\n";
+                            }
+                        } else if(ins.dst.type == Loc::reg
+                            && (mult == 15 || mult == 25 || mult == 27 || mult == 45 || mult == 81)) {
+                            // mult in {3,5,9}*{3,5,9}, since 2 is taken care of earlier with shl
+                            int mul1 = (mult == 15 || mult == 27) ? 3 : (mult == 25 || mult == 45) ? 5 : 9;
+                            int mul2 = (mult == 15 || mult == 25) ? 5 : 9;
+                            dst = loc_str(ins.dst, quad_r);
+                            of << "    lea (" << dst << "," << dst << "," << (mul1-1) << "), " << dst;
+                            of << "\n    lea (" << dst << "," << dst << "," << (mul2-1) << "), " << dst << "\n";
+                        } else {
+                            of << "    imul" << suffix[size] << " " << src << ", " << dst << "\n";
+                        }
+                    } else {
+                        if(ins.src.type == Loc::imm) {
+                            of << "    mov" << suffix[size] << " $" // this is berk
+                                << ((mult*ins.src.imm) & mult_mask) << ", " << dst;
+                            continue;
+                        }
+                        if(mult == 0) {
+                            if(ins.dst.type == Loc::mem) {
+                                of << "    mov" << suffix[size] << " $0, " << dst << "\n";
+                            } else {
+                                of << "    xor" << suffix[size] << " " << dst << ", " << dst << "\n";
+                            }
+                        } else if(mult == 1) {
+                            if(loc_equal(ins.src, ins.dst)) {continue;}
+                            of << "    mov" << suffix[size] << " " << src << ", " << dst << "\n";
+                        } else if(mult == mult_mask) {
+                            if(loc_equal(ins.src, ins.dst)) {
+                                of << "    neg" << suffix[size] << " " << dst << "\n";
+                                continue;
+                            }
+                            if(ins.dst.type == Loc::reg) {
+                                of << "    xor" << suffix[size] << " " << dst << ", " << dst // xor, sub better than mov,neg
+                                    << "\n    sub" << suffix[size] << " " << src << ", " << dst << "\n"; // cuz xor = DAG breaker
+                            } else {
+                                of << "    mov" << suffix[size] << " " << src << ", " << dst
+                                    << "\n    neg" << suffix[size] << dst << "\n";
+                            }
+                        } else if(is_pow2_u64(mult)) {
+                            if(!loc_equal(ins.src, ins.dst)) {
+                                if(ins.src.type == Loc::reg && ins.dst.type == Loc::reg
+                                    && (mult == 2 || mult == 4 || mult == 8)) {
+                                    // lea < mov+shl
+                                    of << "    lea (," << loc_str(ins.src, quad_r) << "," << mult << "), " << dst << "\n";
+                                    continue;
+                                }
+                                of << "    mov" << suffix[size] << " " << src << ", " << dst << "\n";
+                            }
+                            of << "    shl" << suffix[size] << " $" << log2_uint64(mult) << ", " << dst << "\n";
+                        } else if(ins.dst.type == Loc::reg && ins.src.type == Loc::reg ?
+                            (mult == 3 || mult == 5 || mult == 9) : (odd_mult == 3 || odd_mult == 5 || odd_mult == 9)) {
+                            if(ins.src.type == Loc::reg) {
+                                src = loc_str(ins.src, quad_r);
+                                of << "    lea (" << src << "," << src << "," << (odd_mult-1)
+                                    << "), " << dst << "\n";
+                                if(mult != odd_mult) {
+                                    of << "    shl" << suffix[size] << " $" << v2_uint64(mult) << ", " << dst << "\n";
+                                }
+                            } else {
+                                of << "    mov" << suffix[size] << " " << src << ", " << dst << "\n";
+                                dst = loc_str(ins.dst, quad_r);
+                                of << "    lea (" << dst << "," << dst << "," << (mult-1)
+                                    << "), " << dst << "\n";
+                            }
+                        } else if(ins.dst.type == Loc::reg && ins.src.type == Loc::reg &&
+                            (mult == 15 || mult == 25 || mult == 27 || mult == 45 || mult == 81)) {
+                            int mul1 = (mult == 15 || mult == 27) ? 3 : (mult == 25 || mult == 45) ? 5 : 9;
+                            int mul2 = (mult == 15 || mult == 25) ? 5 : 9;
+                            src = loc_str(ins.src, quad_r);
+                            string tmp_dst = loc_str(ins.dst, quad_r);
+                            of << "    lea (" << src << "," << src << "," << (mul1-1) << "), " << dst;
+                            of << "\n    lea (" << tmp_dst << "," << tmp_dst << "," << (mul2-1) << "), " << dst << "\n";
+                        } else if(ins.dst.type == Loc::reg && ins.src.type == Loc::reg && !loc_equal(ins.src, ins.dst)
+                            && (mult == 7 || mult == 11 || mult == 13 || mult == 19 || mult == 21 || mult == 37
+                            || mult == 41 || mult == 73)) {
+                            // on -O1 and higher, reduced to a bitmask anyway
+                            // 1 + (1+{1,2,4,8})*{1,2,4,8}
+                            // = {3,4,5,6,7,9,10,11,13,17,19,21,25,37,41,73}
+                            // => {7,11,13,17,19,21,37,41,73}
+                            int mul1 = (mult == 7 || mult == 13) ? 3 : (mult == 11 || mult == 21 || mult ==41) ? 5 : 9;
+                            int mul2 = 1 << v2_uint64(mult-1);
+                            src = loc_str(ins.src, quad_r);
+                            of << "    lea (" << src << "," << src << "," << (mul1-1) << "), " << dst;
+                            string tmp_dst = loc_str(ins.dst, quad_r);
+                            of << "\n    lea (" << src << "," << tmp_dst << "," << mul2 << "), " << dst << "\n";
+                        } else if(ins.dst.type == Loc::reg && ins.src.type == Loc::reg && !loc_equal(ins.src, ins.dst)
+                            && (mult == 17 || mult == 33 || mult == 65)) {
+                            // 1 + {1,2,4,8}*{1,2,4,8}
+                            // => {17,33,65}
+                            // mul1 = 8;
+                            int mul2 = (mult == 17) ? 2 : (mult == 33 )? 4 : 8;
+                            src = loc_str(ins.src, quad_r);
+                            of << "    lea (," << src << ",8), " << dst;
+                            string tmp_dst = loc_str(ins.dst, quad_r);
+                            of << "\n    lea (" << src << "," << tmp_dst << "," << mul2 << "), " << dst << "\n";
+                        } else {
+                            of << "    imul" << suffix[size] << " $" << mult << ", " << src << ", " << dst << "\n";
+                        }
+                    }
+                    break;}
+                case movx: 
+                case movzxq: { // for movzxq, high bits are dead so fuck it anyway
+                    if(ins.dst.type == Loc::mem) {
+                        of << "    mov" << suffix[ins.size] << " " << loc_str(ins.src, ins.size) << ", "
+                            << loc_str(ins.dst, ins.size) << "\n";
+                        continue;
+                    }
+                    if(loc_equal(ins.src, ins.dst)) {
+                        // *technically, for `movl`, this is not a nop, but in this IR, high
+                        // bits are dead
+                        continue;
+                    }
+                    if(ins.size <= word_r) {
+                        of << "    movz" << suffix[ins.size] << "l " << loc_str(ins.src, ins.size) << ", "
+                            << loc_str(ins.dst, dword_r) << "\n";
+                    } else {
+                        of << "    mov" << suffix[ins.size] << " " << loc_str(ins.src, ins.size) << ", "
+                            << loc_str(ins.dst, ins.size) << "\n";
+                    }
+                    break;}
+                case call: {
+                    of << "    call " << asm_name_by_uid[ins.uid] << "\n";
+                    break;}
+                case cmpx: { // no optimizations
+                    of << "    cmp" << suffix[ins.size] << " " << loc_str(ins.src, ins.size) << ", "
+                        << loc_str(ins.dst, ins.size) << "\n";
+                    break;}
+                case label: {
+                    of << ".label_uid_" << ins.uid << ":\n";
+                    break;}
+                case jz: {
+                    of << "    jz .label_uid_" << ins.uid << "\n";
+                    break;}
+                case jnz: {
+                    of << "    jnz .label_uid_" << ins.uid << "\n";
+                    break;}
+                case jmp: {
+                    of << "    jmp .label_uid_" << ins.uid << "\n";
+                    break;}
+                
             }
         }
     }
