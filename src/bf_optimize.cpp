@@ -148,7 +148,7 @@ struct node {
     int32_t mov_offset;         // for child SEQ and OPs, if !loops_mov_balanced
                                 // this value is meaningless
     // the phrase mov-balanced is shorthand for `loops_mov_balanced && mov_offset==0`
-
+    int32_t off = 0;    // same as cmd.off
     command cmd;
     std::vector<node> children;
 };
@@ -173,8 +173,13 @@ void print_tree(const node& n, int depth = 0) {
     }
     if(n.type == OP) {
         std::cout << " " << op_name(n.cmd.opc);
-        if(has_four_byte_aux(n.cmd.opc)) {
-            std::cout << " " << n.cmd.aux;
+        if(uses_aux(n.cmd.opc)) {
+            std::cout << " " << (uint32_t)n.cmd.aux;
+            if(uses_off(n.cmd.opc)) {
+                std::cout << "; (" << n.cmd.off <<  ")";
+            }
+        } else if(uses_off(n.cmd.opc)) {
+            std::cout << " " << n.cmd.off;
         }
     }
     std::cout << "\n";
@@ -189,18 +194,18 @@ node treeify(vector<command>& commands, size_t begin, size_t end) {
     // MOV, ADD, OUT, IN, BRZ, BRNZ, HLT
     // trusts caller
     node root = {
-        SEQ,
-        true,
-        false,
-        true,
-        0,
-        {},
-        vector<node>(),
+        .type = SEQ,
+        .loops_mov_balanced = true,
+        .has_io = false,
+        .basic_children = true,
+        .mov_offset = 0,
+        .cmd = { 255 },
+        .children = vector<node>(),
     };
     // Is it recursive? Yes. Is recursion slow? Technically, yes. Do I care?
     // Well, yes. Do I care enough to make it iterative? Absolutely not.
 
-    if(commands[begin].opc == BRZ && commands[begin].aux == end-1) {
+    if(commands[begin].opc == BRZ && commands[begin].match == end-1) {
         // parsing a LOOP is identical to parsing a SEQ without the
         // `[` and `]`
         begin++;
@@ -220,16 +225,16 @@ node treeify(vector<command>& commands, size_t begin, size_t end) {
         for(size_t i = begin; i < end; i++) {
             uint8_t opc = commands[i].opc;
             root.children.push_back({
-                OP,
-                false,
-                false,
-                false,
-                0,
-                commands[i],
-                vector<node>(0)
+                .type = OP,
+                .loops_mov_balanced = false,
+                .has_io = false,
+                .basic_children = false,
+                .mov_offset = 0,
+                .cmd = commands[i],
+                .children = vector<node>(0)
             });
             if(opc == MOV) {
-                root.mov_offset += commands[i].aux;
+                root.mov_offset += commands[i].off;
             } else if(opc == IN || opc == OUT) {
                 root.has_io = true;
             }
@@ -241,7 +246,7 @@ node treeify(vector<command>& commands, size_t begin, size_t end) {
     size_t section_start = begin;
     for(size_t i = begin; i < end; i++) {
         uint8_t opc = commands[i].opc;
-        int32_t aux = commands[i].aux;
+        int32_t aux = commands[i].match;
         if(opc == BRZ) {
             if(section_start != i) {
                 root.children.push_back(treeify(commands, section_start, i));
@@ -306,9 +311,9 @@ int clear_nop(vector<command>& commands) {
 
         commands[src] = commands[dst];
         if(opc == BRZ) {
-            commands[commands[src].aux].aux = src;
+            commands[commands[src].match].match = src;
         } else if(opc == BRNZ) {
-            commands[commands[src].aux].aux = src;
+            commands[commands[src].match].match = src;
         }
 
         src++;
@@ -327,7 +332,7 @@ void recompute_properties(node& root) {
         for(node& child : root.children) {
             uint8_t opc = child.cmd.opc;
             if(opc == MOV) {
-                root.mov_offset += child.cmd.aux;
+                root.mov_offset += child.cmd.off;
             } else if(opc == OUT || opc == OUTC || opc == IN) {
                 root.has_io = true;
             }
@@ -391,7 +396,7 @@ void flatten(node& root) {
     if(root.children.size() == 0) {
         if(root.type == SEQ) {
             root.type = OP;
-            root.cmd = { NOP, 0 };
+            root.cmd = { NOP };
         }
         return;
     }
@@ -498,13 +503,13 @@ void linearize(const node& n, std::vector<command>& out) {
             break;
         case LOOP:
             int32_t brz_pos = out.size();
-            out.push_back({BRZ, 0});
+            out.push_back(command::make_match(BRZ, 0, n.off));
             for(const node& child : n.children) {
                 linearize(child, out);
             }
             int32_t brnz_pos = out.size();
-            out.push_back({BRNZ, brz_pos});
-            out[brz_pos].aux = brnz_pos;
+            out.push_back(command::make_match(BRNZ, brz_pos, n.off));
+            out[brz_pos].match = brnz_pos;
             break;
     }
 }
@@ -519,9 +524,9 @@ void nuke_touched_values(const node& root, tape_metadata& tmd) {
     if(root.basic_children) {
         for(const node& child : root.children) {
             uint8_t opc = child.cmd.opc;
-            int32_t aux = child.cmd.aux;
+            int32_t off = child.cmd.off;
             if(opc == MOV) {
-                tmd.mp_pos += aux; // since root is mov-balanced, mp_pos will return to 0
+                tmd.mp_pos += off; // since root is mov-balanced, mp_pos will return to 0
             } else if(opc == ADD || opc == IN || opc == SET || opc == ACCUMA || opc == MACMA) {
                 // nuke it
                 tmd.mark_unknown();
@@ -580,20 +585,21 @@ void simplified_pass(const node& root, tape_metadata& tmd) {
         uint8_t regA;
         for(const node& child : root.children) {
             uint8_t opc = child.cmd.opc;
-            int32_t aux = child.cmd.aux;
+            uint8_t aux = child.cmd.aux;
+            int32_t off = child.cmd.off;
             if(opc == MOV) {
-                tmd.mp_pos += aux;
+                tmd.mp_pos += off;
             } else if(opc == ADD) {
                 cell_value cell = tmd.get_val();
                 if(cell.known) {
-                    tmd.set_val(cell.val + (uint8_t)aux);
+                    tmd.set_val(cell.val + aux);
                 }
             } else if(opc == OUT) {
                 // do nothing
             } else if(opc == IN) {
                 tmd.mark_unknown();
             } else if(opc == SET) {
-                tmd.set_val((uint8_t)aux);
+                tmd.set_val(aux);
             } else if(opc == PUTA) {
                 cell_value cell = tmd.get_val();
                 if(cell.known) {
@@ -612,7 +618,7 @@ void simplified_pass(const node& root, tape_metadata& tmd) {
             } else if(opc == MACMA) {
                 cell_value cell = tmd.get_val();
                 if(regA_known && cell.known) {
-                    tmd.set_val(cell.val + regA*(uint8_t)aux);
+                    tmd.set_val(cell.val + regA*aux);
                 } else if(!regA_known) {
                     tmd.mark_unknown();
                 }
@@ -657,15 +663,16 @@ void translational_affine_loop_solving(node& root) {
         int32_t rel_ptr = 0;
         for(node& child : root.children) {
             uint8_t opc = child.cmd.opc;
-            int32_t aux = child.cmd.aux;
+            uint8_t aux = child.cmd.aux;
+            int32_t off = child.cmd.off;
             if(opc == MOV) {
-                rel_ptr += aux;
+                rel_ptr += off;
             } else if(opc == ADD) {
                 auto it = addends.find(rel_ptr);
                 if(it == addends.end()) {
-                    addends[rel_ptr] = (uint8_t)aux;
+                    addends[rel_ptr] = aux;
                 } else {
-                    it->second = it->second + (uint8_t)aux;
+                    it->second = it->second + aux;
                 }
             } else { // any other operations should not be here
                 return;
@@ -698,42 +705,43 @@ void translational_affine_loop_solving(node& root) {
                 false,
                 true,
                 0,
-                { SET, 0 },
+                0,
+                { SET, 0, 0 },
             });
             root.children.shrink_to_fit();
             return;
         }
         // now, we do some very complex math :(
         root.children.reserve(2 + 2*addends.size());
-        root.children.push_back({ OP, true, false, true, 0,
-                { PUTA, 0 },
+        root.children.push_back({ OP, true, false, true, 0, 0,
+                { PUTA },
         });
-        root.children.push_back({ OP, true, false, true, 0,
-                { SET, 0 },
+        root.children.push_back({ OP, true, false, true, 0, 0,
+                { SET, 0, 0 },
         });
         // since rel_ptr == 0
         for(const auto& [ ptr, addend ] : addends) {
             if(ptr == 0) {continue;}
             uint8_t net_addend = addend * c0_addend_neg_inverse;
-            root.children.push_back({ OP, true, false, true, 0,
+            root.children.push_back({ OP, true, false, true, 0, 0,
                 { MOV, ptr - rel_ptr },
             });
             rel_ptr = ptr;
             if(net_addend == 1) {
-                root.children.push_back({ OP, true, false, true, 0,
+                root.children.push_back({ OP, true, false, true, 0, 0,
                     { ACCUMA, 0 },
                 });
             } else {
-                root.children.push_back({ OP, true, false, true, 0,
-                    { MACMA, net_addend },
+                root.children.push_back({ OP, true, false, true, 0, 0,
+                    { MACMA, net_addend, 0 },
                 });
             }
         }
-        root.children.push_back({ OP, true, false, true, 0,
+        root.children.push_back({ OP, true, false, true, 0, 0,
                 { MOV, -rel_ptr },
         });
-        root.children.push_back({ OP, true, false, true, 0,
-                { RKILL, 0 },
+        root.children.push_back({ OP, true, false, true, 0, 0,
+                { RKILL },
         });
     }
 }
@@ -761,28 +769,29 @@ void main_pass(node& root, tape_metadata& tmd) {
             uint8_t regA;
             for(node& child : root.children) {
                 uint8_t opc = child.cmd.opc;
-                int32_t aux = child.cmd.aux;
+                uint8_t aux = child.cmd.aux;
+                int32_t off = child.cmd.off;
                 if(opc == MOV) {
-                    tmd.mp_pos += aux;
+                    tmd.mp_pos += off;
                 } else if(opc == ADD) {
                     cell_value cell = tmd.get_val();
                     if(cell.known) {
-                        tmd.set_val(cell.val + (uint8_t)aux);
-                        child.cmd = { SET, (uint8_t)(cell.val + aux) }; // constant folding
+                        tmd.set_val(cell.val + aux);
+                        child.cmd = { SET, (uint8_t)(cell.val + aux), 0}; // constant folding
                     }
                 } else if(opc == OUT) {
                     cell_value cell = tmd.get_val();
                     if(cell.known) {
-                        child.cmd = { OUTC, cell.val };
+                        child.cmd = { OUTC, cell.val, 0 };
                     }
                 } else if(opc == IN) {
                     tmd.mark_unknown();
                 } else if(opc == SET) {
                     cell_value cell = tmd.get_val();
-                    if(cell.known && cell.val == (uint8_t)aux) {
+                    if(cell.known && cell.val == aux) {
                         child.cmd.opc = NOP;
                     } else {
-                        tmd.set_val((uint8_t)aux);
+                        tmd.set_val(aux);
                     }
                 } else if(opc == PUTA) {
                     cell_value cell = tmd.get_val();
@@ -796,21 +805,21 @@ void main_pass(node& root, tape_metadata& tmd) {
                     cell_value cell = tmd.get_val();
                     if(regA_known && cell.known) {
                         tmd.set_val(cell.val + regA);
-                        child.cmd = { SET, (uint8_t)(cell.val + regA) }; // remove dependency on A
+                        child.cmd = { SET, (uint8_t)(cell.val + regA), 0 }; // remove dependency on A
                     } else if(!regA_known) {
                         tmd.mark_unknown();
                     } else if(regA_known && !cell.known) {
-                        child.cmd = { ADD, regA }; // this still removes the dependency on A
+                        child.cmd = { ADD, regA, 0 }; // this still removes the dependency on A
                     }
                 } else if(opc == MACMA) {
                     cell_value cell = tmd.get_val();
                     if(regA_known && cell.known) {
-                        tmd.set_val(cell.val + regA*(uint8_t)aux);
-                        child.cmd = { SET, (uint8_t)(cell.val + regA*(uint8_t)aux) };
+                        tmd.set_val(cell.val + regA*aux);
+                        child.cmd = { SET, (uint8_t)(cell.val + regA*aux), 0 };
                     } else if(!regA_known) {
                         tmd.mark_unknown();
                     } else if(regA_known && !cell.known) {
-                        child.cmd = { ADD, (uint8_t)(regA*aux) };
+                        child.cmd = { ADD, (uint8_t)(regA*aux), 0 };
                     }
                 } else if(opc == RKILL) {
                     regA_known = false;
@@ -897,9 +906,10 @@ void main_pass(node& root, tape_metadata& tmd) {
     tape_metadata tmd_dup = tmd;
     for(node& child : root.children) {
         uint8_t opc = child.cmd.opc;
-        int32_t aux = child.cmd.aux;
+        uint8_t aux = child.cmd.aux;
+        int32_t off = child.cmd.off;
         if(opc == MOV) {
-            tmd_dup.mp_pos += aux;
+            tmd_dup.mp_pos += off;
         } else if(opc == ADD) {
             cell_value cell = tmd_dup.get_val();
             if(cell.known) {
@@ -980,7 +990,6 @@ void dead_write_elimination(node& root) {
     bool regA_alive = true;
     for(int i = root.children.size() - 1; i >= 0; i--) {
         uint8_t opc = root.children[i].cmd.opc;
-        int32_t aux = root.children[i].cmd.aux;
         if(opc == PUTA) {
             if(!regA_alive) {
                 root.children[i].cmd.opc = NOP; // if it's dead, remove the operation
@@ -1004,7 +1013,7 @@ void dead_write_elimination(node& root) {
     // and since cells may be used later, they all start out as alive (duh)
     for(int i = root.children.size() - 1; i >= 0; i--) {
         uint8_t opc = root.children[i].cmd.opc;
-        int32_t aux = root.children[i].cmd.aux;
+        int32_t off = root.children[i].cmd.off;
         if(opc == IN || opc == SET) {
             if(dead.find(mp) != dead.end()) {
                 root.children[i].cmd.opc = NOP;
@@ -1014,7 +1023,7 @@ void dead_write_elimination(node& root) {
         } else if(opc == OUT || opc == PUTA) {
             dead.erase(mp);
         } else if(opc == MOV) {
-            mp -= aux;  // negative because we're doing a reverse iteration, although it
+            mp -= off;  // negative because we're doing a reverse iteration, although it
                         // doesn't actually matter at all since > and < are symmetric in BF
         } else if(opc == ADD || opc == ACCUMA || opc == MACMA) {
             if(dead.find(mp) != dead.end()) {
@@ -1044,11 +1053,11 @@ void strength_reduction(node& root) {
     // removes MOV 0, ADD 0, and MACMA 0
     for(node& child : root.children) {
         uint8_t opc = child.cmd.opc;
-        uint32_t aux = child.cmd.aux;
-        if(opc == MOV || opc == ADD || opc == MACMA) {
-            if(aux == 0) {
-                child.cmd.opc = NOP;
-            }
+        uint8_t aux = child.cmd.aux;
+        int32_t off = child.cmd.off;
+        if((opc == MOV) && (off == 0)
+            || (opc == ADD || opc == MACMA) && aux == 0) {
+            child.cmd.opc = NOP;
         }
     }
     // concatenates consecutive ADDs and MOVs
@@ -1057,12 +1066,14 @@ void strength_reduction(node& root) {
     while(curr_instr < root.children.size()) {
         uint8_t& prev_opc = root.children[prev_instr].cmd.opc;
         uint8_t& curr_opc = root.children[curr_instr].cmd.opc;
-        int32_t& prev_aux = root.children[prev_instr].cmd.aux;
-        int32_t& curr_aux = root.children[curr_instr].cmd.aux;
+        uint8_t& prev_aux = root.children[prev_instr].cmd.aux;
+        uint8_t& curr_aux = root.children[curr_instr].cmd.aux;
+        int32_t& prev_off = root.children[prev_instr].cmd.off;
+        int32_t& curr_off = root.children[curr_instr].cmd.off;
         if(prev_opc == MOV && curr_opc == MOV) { // concatenate
-            prev_aux = prev_aux + curr_aux;
+            prev_off = prev_off + curr_off;
             curr_opc = NOP;
-            if(prev_aux == 0) {
+            if(prev_off == 0) {
                 prev_opc = NOP;
                 while(prev_instr > 0) {
                     prev_instr--;
@@ -1076,7 +1087,7 @@ void strength_reduction(node& root) {
             }
             curr_instr++;
         } else if(prev_opc == ADD && curr_opc == ADD) {
-            prev_aux = (uint8_t)(prev_aux + curr_aux);
+            prev_aux = prev_aux + curr_aux;
             curr_opc = NOP;
             if(prev_aux == 0) {
                 prev_opc = NOP;
@@ -1103,6 +1114,128 @@ void strength_reduction(node& root) {
     nop_compaction(root);
 }
 
+void offsetize(node& root, int32_t& inherited_offset) {
+    // turns stuff like
+    // MOV 1
+    // ADD 10
+    // LOOP:
+    //   MOV 3
+    //   PUTA
+    //   MOV -3
+    //   ACCUMA
+    // MOV -5
+    // into
+    // ADD 10; (1)
+    // LOOP (1):
+    //   PUTA (4)
+    //   ACCUMA (1)
+    // MOV -4
+    if(root.type == OP) {
+        nuke("can you don't");
+    }
+    
+    if((root.type == LOOP && (root.mov_offset != 0 || !root.loops_mov_balanced)) && inherited_offset != 0) {
+        nuke("bing bang boom!");
+    }
+    if(root.basic_children) { // the trivial case
+        root.off = inherited_offset;
+        for(node& child : root.children) {
+            if(child.cmd.opc == MOV) {
+                inherited_offset += child.cmd.off;
+                child.cmd.opc = NOP;
+            } else if(uses_off(child.cmd.opc)) {
+                child.cmd.off = inherited_offset;
+            }
+        }
+        if(root.type == LOOP && (root.mov_offset != 0 || !root.loops_mov_balanced)) {
+            root.children.push_back({
+                .type = OP,
+                .cmd = { MOV, inherited_offset }
+            });
+            inherited_offset = 0;
+        }
+        nop_compaction(root);
+    } else {
+        if(root.children.size() == 0) {return;}
+        root.off = inherited_offset;
+        for(size_t i = 0; i < root.children.size(); i++) {
+            if(root.children[i].type == LOOP
+                && (root.children[i].mov_offset != 0 || !root.children[i].loops_mov_balanced)) {
+                if(inherited_offset != 0) {
+                    // before touching it
+                    // the current loop is mov-unbalanced, so canonicalize offset
+                    if(i > 0 && root.children[i-1].type == SEQ) {
+                        node& prev = root.children[i-1];
+                        if(prev.basic_children) {
+                            prev.children.push_back({
+                                .type = OP,
+                                .cmd = {MOV, inherited_offset}
+                            });
+                            prev.mov_offset += inherited_offset;
+                            inherited_offset = 0;
+                        } else {
+                            prev.children.push_back({
+                                .type = SEQ,
+                                .loops_mov_balanced = true,
+                                .has_io = false,
+                                .basic_children = true,
+                                .mov_offset = inherited_offset,
+                                .children = vector<node>({{
+                                    .type = OP,
+                                    .cmd = { MOV, inherited_offset }
+                                }})
+                            });
+                            prev.mov_offset += inherited_offset;
+                            inherited_offset = 0;
+                        }
+                    } else {
+                        root.children.insert(root.children.begin() + i, {
+                            .type = SEQ,
+                            .loops_mov_balanced = true,
+                            .has_io = false,
+                            .basic_children = true,
+                            .mov_offset = inherited_offset,
+                            .children = vector<node>({{
+                                .type = OP,
+                                .cmd = { MOV, inherited_offset }
+                            }})
+                        });
+                        inherited_offset = 0;
+                        i++;
+                    }
+                }
+                offsetize(root.children[i], inherited_offset);
+            } else {
+                offsetize(root.children[i], inherited_offset);
+            }
+        }
+        if(root.type == LOOP && (root.mov_offset != 0 || !root.loops_mov_balanced)) {
+            if(inherited_offset != 0) {
+                if(root.children.back().type == SEQ && root.children.back().basic_children) {
+                    // we formerly early-return on size == 0
+                    root.children.back().children.push_back({
+                        .type = OP,
+                        .cmd = { MOV, inherited_offset }
+                    });
+                } else {
+                    root.children.push_back({
+                        .type = SEQ,
+                        .loops_mov_balanced = true,
+                        .has_io = false,
+                        .basic_children = true,
+                        .mov_offset = inherited_offset,
+                        .children = vector<node>({{
+                            .type = OP,
+                            .cmd = { MOV, inherited_offset }
+                        }})
+                    });
+                }
+                inherited_offset = 0;
+            }
+        }
+    }
+}
+
 
 
 
@@ -1113,18 +1246,17 @@ int optimize(vector<command>& commands, bool tape_empty) {
     size_t mov_chain_start = 0;
     bool mov_chain = false;
     bool add_chain = false;
-    uint8_t opc;
-    int32_t aux;
     for(size_t i = 0; i < commands.size(); i++) {
-        opc = commands[i].opc;
-        aux = commands[i].aux;
+        uint8_t opc = commands[i].opc;
+        uint8_t aux = commands[i].aux;
+        int32_t off = commands[i].off;
         if(opc == ADD) {
             if(mov_chain) {
                 // if it's in the middle of a MOV chain, check for cases 
                 // like +++>><<+++ where the MOV becomes a MOV 0 or NOP,
                 // so it can be interrupted)
                 mov_chain = false;
-                if(commands[mov_chain_start].aux == 0) {
+                if(commands[mov_chain_start].off == 0) {
                     commands[mov_chain_start].opc = NOP;
                     add_chain = true;
                 } else {
@@ -1152,7 +1284,7 @@ int optimize(vector<command>& commands, bool tape_empty) {
                 mov_chain_start = i;
                 mov_chain = true;
             } else {
-                commands[mov_chain_start].aux += aux;
+                commands[mov_chain_start].off += off;
                 commands[i].opc = NOP;
             }
         } else {
@@ -1171,7 +1303,7 @@ int optimize(vector<command>& commands, bool tape_empty) {
     flatten(root);
 
     tape_metadata tmd;
-    tmd.out_of_range_zero = true || tape_empty;
+    tmd.out_of_range_zero = tape_empty;
     main_pass(root, tmd);
     
     flatten(root);
@@ -1183,6 +1315,9 @@ int optimize(vector<command>& commands, bool tape_empty) {
     strength_reduction(root);
 
     commands.clear();
+
+    int32_t offset = 0;
+    offsetize(root, offset);
     linearize(root, commands);
 
     return 0;

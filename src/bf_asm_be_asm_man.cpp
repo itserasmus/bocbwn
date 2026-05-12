@@ -54,6 +54,9 @@ static inline reg_size promote_reg(reg_size reg, reg_size min) {
 static inline uint64_t reg_mask(reg_size reg) {
     return reg == byte_r ? 0xFF : reg == word_r ? 0xFFFF : reg == dword_r ? 0xFFFFFFFF : 0xFFFFFFFFFFFFFFFF;
 }
+static inline uint64_t reg_msb(reg_size reg) {
+    return reg == byte_r ? 0x80 : reg == word_r ? 0x8000 : reg == dword_r ? 0x80000000 : 0x8000000000000000;
+}
 
 // if you ever change this, change everything related to it too... or just... don't.
 enum GPR : uint8_t {
@@ -87,7 +90,7 @@ const string& RegName(GPR reg, reg_size size) {
 };
 
 enum AsmOpc : uint8_t {
-    addx, andx, imulx, movx, movzxq, call, cmpx, label, jz, jnz, jmp
+    addx, andx, imulx, movx, movzxq, call, cmpx, label, jz, jnz, jl, jg, jle, jge, jmp, nop
 };
 
 struct Loc {
@@ -451,7 +454,7 @@ public:
         for(AsmInstr& ins : asm_cmd) {
             switch(ins.opc) {
                 case addx: {
-                    if(ins.src.type == Loc::imm && ins.src.imm == 0) {continue;}
+                    if(ins.src.type == Loc::imm && ins.src.i == 0) {continue;}
                     size = ins.dst.type == Loc::mem ? ins.size : promote_reg(ins.size, dword_r);
                     of << "    add" << suffix[size] << " " << loc_str(ins.src, size)
                         << ", " << loc_str(ins.dst, size) << "\n";
@@ -635,8 +638,22 @@ public:
                 case jnz: {
                     of << "    jnz .label_uid_" << ins.uid << "\n";
                     break;}
+                case jl: {
+                    of << "    jl .label_uid_" << ins.uid << "\n";
+                    break;}
+                case jg: {
+                    of << "    jg .label_uid_" << ins.uid << "\n";
+                    break;}
+                case jle: {
+                    of << "    jle .label_uid_" << ins.uid << "\n";
+                    break;}
+                case jge: {
+                    of << "    jge .label_uid_" << ins.uid << "\n";
+                    break;}
                 case jmp: {
                     of << "    jmp .label_uid_" << ins.uid << "\n";
+                    break;}
+                case nop: {
                     break;}
                 
             }

@@ -141,6 +141,7 @@ int main(int argc, char** argv) {
 
 
 int read_bytecode(uint32_t& len, string& input_file_name,vector<command>& commands) {
+    // TODO: fix
     ifstream f(input_file_name, ios::binary);
     if(!f) {
         cerr << "Fatal: Failed to open " << input_file_name << endl;
@@ -156,12 +157,12 @@ int read_bytecode(uint32_t& len, string& input_file_name,vector<command>& comman
             cerr << "Unexpected EOF" << endl;
             return 1;
         }
-        if(has_four_byte_aux(c)) {
-            if(!f.read(reinterpret_cast<char*>(&a), sizeof(a))) {
-                cerr << "Unexpected EOF" << endl;
-                return 1;
-            }
-        }
+        // if(has_four_byte_aux(c)) {
+        //     if(!f.read(reinterpret_cast<char*>(&a), sizeof(a))) {
+        //         cerr << "Unexpected EOF" << endl;
+        //         return 1;
+        //     }
+        // }
         commands[i] = {c, a};
     }
     
@@ -190,7 +191,7 @@ int read_source(string& input_file_name, vector<command>& commands, bool strict)
         } else if(byte == '<') {
             commands.push_back({MOV, -1});
         } else if(byte == '[') {
-            commands.push_back({BRZ, 0});
+            commands.push_back(command::make_match(BRZ, 0));
             block_stack.push_back(commands.size() - 1);
         } else if(byte == ']') {
             if(block_stack.size() == 0) {
@@ -201,17 +202,17 @@ int read_source(string& input_file_name, vector<command>& commands, bool strict)
                     continue;
                 }
             }
-            commands.push_back({BRNZ, block_stack[block_stack.size() - 1]});
-            commands[block_stack[block_stack.size() - 1]].aux = commands.size() - 1;
+            commands.push_back(command::make_match(BRNZ, block_stack[block_stack.size() - 1]));
+            commands[block_stack[block_stack.size() - 1]].match = commands.size() - 1;
             block_stack.pop_back();
         } else if(byte == '+') {
-            commands.push_back({ADD, 1});
+            commands.push_back({ADD, 1, 0});
         } else if(byte == '-') {
-            commands.push_back({ADD, -1});
+            commands.push_back({ADD, (uint8_t)(-1), 0});
         } else if(byte == '.') {
-            commands.push_back({OUT, 1});
+            commands.push_back({OUT, 0});
         } else if(byte == ',') {
-            commands.push_back({IN, 1});
+            commands.push_back({IN, 0});
         }
         prev = byte;
         char_no++;
@@ -223,8 +224,8 @@ int read_source(string& input_file_name, vector<command>& commands, bool strict)
         }
         cerr << "Matching unmatched '['";
         for(int i = block_stack.size() - 1; i >= 0; i++) {
-            commands.push_back({BRNZ, block_stack[block_stack.size() - 1]});
-            commands[block_stack[block_stack.size() - 1]].aux = commands.size() - 1;
+            commands.push_back(command::make_match(BRNZ, block_stack[block_stack.size() - 1]));
+            commands[block_stack[block_stack.size() - 1]].match = commands.size() - 1;
             block_stack.pop_back();
         }
     }
@@ -233,33 +234,68 @@ int read_source(string& input_file_name, vector<command>& commands, bool strict)
 }
 
 int dump_bfassembly(string& output_file_name, vector<command>& commands) {
-    ofstream fo(output_file_name, ios::binary);
+    ofstream fo(output_file_name, std::ios::binary);
 
     if(!fo) {
         cerr << "Fatal: Failed to open output file " << output_file_name << endl;
         return 1;
     }
-    uint8_t c;
-    int32_t a = commands.size();
 
-    static const int cmd_names_len = 8;
     #ifdef _WIN32
-    static const char* const newline = "\r\n";
-    static const int newline_len = 2;
+    static constexpr const char* newline = "\r\n";
+    static constexpr int newline_len = 2;
     #else
-    static const char* const newline = "\n";
-    static const int newline_len = 1;
+    static constexpr const char* newline = "\n";
+    static constexpr int newline_len = 1;
     #endif
+
     string num;
+    string indent;
     for(const command& cmd : commands) {
-        a = cmd.aux;
-        c = cmd.opc;
+        const uint8_t opc = cmd.opc;
 
-        fo.write(op_name(c), cmd_names_len);
-
-        if(has_four_byte_aux(c)) {
-            num = to_string(a);
+        
+        if(opc == BRNZ) {
+            indent.pop_back();
+            indent.pop_back();
+        }
+        bool wrote_arg = false;
+        
+        fo.write(indent.c_str(), indent.size());
+        
+        fo.write(op_name(opc), 8);
+        if(uses_aux(opc)) {
+            num = std::to_string(cmd.aux);
             fo.write(num.c_str(), num.size());
+            wrote_arg = true;
+        }
+
+        // if(uses_match(opc)) {
+        //     if(wrote_arg) {
+        //         fo.write("; ", 2);
+        //     }
+
+        //     num = std::to_string(cmd.match);
+        //     fo.write(num.c_str(), num.size());
+        //     wrote_arg = true;
+        // }
+
+        if(uses_off(opc) && cmd.off != 0) {
+            if(wrote_arg) {
+                fo.write("; ", 2);
+            }
+
+            fo.write("(", 1);
+
+            num = std::to_string(cmd.off);
+            fo.write(num.c_str(), num.size());
+
+            fo.write(")", 1);
+        }
+
+        if(opc == BRZ) {
+            indent.push_back(' ');
+            indent.push_back(' ');
         }
         fo.write(newline, newline_len);
     }
@@ -281,9 +317,9 @@ int dump_bytecode(string& output_file_name, vector<command>& commands) {
         c = cmd.opc;
 
         fo.write(reinterpret_cast<char*>(&c), sizeof(c));
-        if(has_four_byte_aux(c)) {
-            fo.write(reinterpret_cast<char*>(&a), sizeof(a));
-        }
+        // if(has_four_byte_aux(c)) {
+        //     fo.write(reinterpret_cast<char*>(&a), sizeof(a));
+        // }
     }
 
     return 0;

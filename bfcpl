@@ -187,7 +187,7 @@ fi
 [[ "$verbose" == true ]] && echo "Compiling $name to $output"
 if [[ "$out_type" -eq 2 ]]; then
     ./bf_cmplr "$name" -o "$out_asm" "-in=$in_type" "-out=2" "${cmplr_flags[@]}"
-    clang++ src/bf_asm.cpp "$out_asm" -o "$output"
+    clang src/bf_asm.c "$out_asm" -o "$output"
     if [[ "$save_asm" == false ]]; then
         rm -f "$out_asm"
     fi

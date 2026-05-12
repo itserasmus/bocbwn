@@ -7,7 +7,15 @@ BOCBWN comes with a (work in progress) proof of correctness of all its parts[^1]
 
 For usage, skip directly to [BOCBWN Usage](#bocbwn-usage)
 
+[^1]: the proofs provided are proofs that the methodBOCBWN is an optimizing compiler for brainfuck, one of the first esoteric programming languages,
+which despite its minimal syntax, [is turing complete](https://en.wikipedia.org/wiki/Brainfuck).
+
+BOCBWN comes with a (work in progress) proof of correctness of all its parts[^1], in `proofs/`!
+
+For usage, skip directly to [BOCBWN Usage](#bocbwn-usage)
+
 [^1]: the proofs provided are proofs that the methods used in BOCBWN are sound, and while the
+s used in BOCBWN are sound, and while the
 implementation follows relatively trivially from the intent, the implementations are not proved.
 
 ## Brainfuck Specification

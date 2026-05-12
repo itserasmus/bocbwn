@@ -8,9 +8,28 @@
 using namespace std;
 
 
-struct command {
+class command {
+public:
     uint8_t opc;
-    int32_t aux;
+    uint8_t aux;
+    int32_t off;
+    int32_t match; // for brz
+    
+    command()
+        : opc(-1), aux(0), off(0) {}
+    command(uint8_t opc)
+        : opc(opc), aux(0), off(0) {}
+    command(uint8_t opc, int32_t off)
+        : opc(opc), aux(0), off(off) {}
+    static inline command make_match(uint8_t opc, int32_t match, int32_t off = 0) {
+        command m;
+        m.opc = opc;
+        m.off = off;
+        m.match = match;
+        return m;
+    }
+    command(uint8_t opc, uint8_t var, int32_t off)
+        : opc(opc), aux(var), off(off) {}
 };
 
 // all instructions except
@@ -40,10 +59,17 @@ enum OP_CODES : uint8_t {
     HLT,        // halt program
 };
 
+constexpr bool uses_aux(uint8_t opc) {
+    return opc == ADD || opc == SET || opc == OUTC || opc == MACMA;
+}
+constexpr bool uses_off(uint8_t opc) {
+    return opc == MOV || opc == ADD || opc == OUT || opc == IN || opc == BRZ
+        || opc == BRNZ || opc == SET || opc == PUTA || opc == ACCUMA || opc == MACMA;
+}
+constexpr bool uses_match(uint8_t opc) {
+    return opc == BRZ || opc == BRNZ;
+}
 
-#define has_four_byte_aux(c) \
-    c == MOV    || c == ADD     || c == BRZ     || c == BRNZ    ||\
-    c == SET    || c == MACMA   || c == OUTC
 
 inline const char* op_name(uint8_t opc) {
     static const char* const cmd_names[] = {
